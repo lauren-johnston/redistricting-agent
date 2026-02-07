@@ -2,7 +2,7 @@ import os
 
 from loguru import logger
 
-from line.llm_agent import LlmAgent, LlmConfig, end_call, web_search
+from line.llm_agent import LlmAgent, LlmConfig, end_call
 from line.voice_agent_app import AgentEnv, CallRequest, VoiceAgentApp
 
 #  ANTHROPIC_API_KEY=your-key uv python main.py
@@ -57,16 +57,6 @@ Summarize what you've learned and confirm it's accurate before ending.
 
 # Tools
 
-## web_search
-Use when you genuinely don't know something about redistricting or need current information. Don't overuse it.
-
-Before searching, acknowledge naturally:
-- "Let me look that up"
-- "Good question, let me check"
-- "Hmm, I'm not sure—give me a sec"
-
-After searching, synthesize into a brief conversational answer. Never read search results verbatim.
-
 ## end_call
 Use when you've gathered all the information and the conversation has concluded.
 
@@ -79,7 +69,7 @@ Never use for brief pauses or "hold on" moments.
 
 # Handling common situations
 Didn't catch something: "Sorry, I didn't catch that—could you say that again?"
-Don't know the answer: "I'm not sure about that. Want me to look it up?"
+Don't know the answer: "I'm not sure about that, but I can help you think through it."
 Caller seems unsure how to describe location: "Think about the places you go regularly—your grocery store, school, park, or place of worship. What are some of those spots?"
 Caller doesn't know what to share: "Just tell me about your neighborhood and what makes it special. What do you and your neighbors have in common?"
 Caller is brief: Gently probe with follow-up questions to get richer detail.
@@ -100,7 +90,7 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
     return LlmAgent(
         model="anthropic/claude-haiku-4-5-20251001",
         api_key=os.getenv("ANTHROPIC_API_KEY"),
-        tools=[end_call, web_search],
+        tools=[end_call],
         config=LlmConfig.from_call_request(
             call_request, fallback_system_prompt=SYSTEM_PROMPT, fallback_introduction=INTRODUCTION
         ),
