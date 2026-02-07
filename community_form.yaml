@@ -1,0 +1,53 @@
+questionnaire:
+  id: "community_of_interest"
+  text: "Community of Interest for Redistricting"
+  questions:
+    - id: "caller_name"
+      text: "Can I get your name?"
+      type: "string"
+      required: false
+
+    - id: "zipcode"
+      text: "What's your zip code?"
+      type: "string"
+      required: true
+
+    - id: "community_name"
+      text: "What do you call your community or neighborhood?"
+      type: "string"
+      required: true
+
+    - id: "community_description"
+      text: "In a sentence or two, how would you describe your community to someone who's never been there?"
+      type: "string"
+      required: true
+
+    - id: "key_places"
+      text: "What are some of the main places you and your neighbors go — like a grocery store, park, school, or place of worship?"
+      type: "string"
+      required: true
+
+    - id: "community_boundaries"
+      text: "Where would you say your community ends? Think about major roads, landmarks, or natural features like rivers or hills that mark the edges."
+      type: "string"
+      required: true
+
+    - id: "cultural_interests"
+      text: "What cultural or historical characteristics define your community? For example, shared heritage, ethnic identity, or a historical neighborhood."
+      type: "string"
+      required: false
+
+    - id: "economic_interests"
+      text: "What are the economic characteristics of your community? Things like the main industries, common jobs, or economic concerns like gentrification or unemployment."
+      type: "string"
+      required: false
+
+    - id: "community_activities"
+      text: "What brings people in your community together? Things like churches, community centers, local events, or shared services."
+      type: "string"
+      required: false
+
+    - id: "other_considerations"
+      text: "Is there anything else you'd want redistricting officials to know about why your community should be kept together in a single district?"
+      type: "string"
+      required: false
