@@ -1,44 +1,46 @@
-# Basic Chat Example
+# Redistricting Voice Agent
 
-A simple conversational voice agent that demonstrates the core Line SDK features.
+Gathering data about how people define their community is a critical step in the redistricting process. In 2019, I cofounded the Representable.org project in partnership with Princeton's Electoral Innovation Lab. We had people draw their community on a map with MapBox and type in the info about their community.
 
-## Overview
+Although this tool was used successfully in several states during the 2020 redistricting cycle, the fact that people had to have access to a laptop, a fast internet connection, and the willingness to create an account and hand-draw their community made it inaccessible to the broader public.
 
-This example creates a basic voice agent that:
-- Has a natural conversation with the user
-- Accepts configurable system prompts and introductions via the call request
-- Uses the `end_call` tool to gracefully end conversations
+In 2026, realistic voice agents with tool calling have made it possible to collect community data from the public with only a phone call. For the next redistricting cycle, we want everyone to be able to contribute.
 
-## Running the Example
+# How to use
+
+## Prequisites
+
+1. Sign up for a Cartesia account at [Cartesia](https://cartesia.ai) and create a voice agent and link to Github in settings. Then, clone the repo for that agent locally.
+2. Sign up for an Anthropic developer account and get an API key at [Anthropic](https://console.anthropic.com/api-keys).
+
+## Instructions
+
+1. Install the Cartesia CLI and `uv` to manage dependencies and virtual environments.
 
 ```bash
-cd examples/basic_chat
-ANTHROPIC_API_KEY=your-key uv run python main.py
+curl -fsSL https://cartesia.sh | sh
+curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-## How It Works
+2. Create a [Cartesia API key](https://play.cartesia.ai/keys). You will need this in the next step.
+3. Authenticate into Cartesia and initialize a project. You can link this project to an agent you created.
 
-The agent is configured with:
-- **Model**: Anthropic Claude Haiku 4.5
-- **Tools**: `end_call` - allows the agent to end the call
-- **Config**: System prompt and introduction from the call request, with defaults
-
-```python
-async def get_agent(env: AgentEnv, call_request: CallRequest):
-    return LlmAgent(
-        model="anthropic/claude-haiku-4-5-20251001",
-        api_key=os.getenv("ANTHROPIC_API_KEY"),
-        tools=[end_call],
-        config=LlmConfig(
-            system_prompt=call_request.agent.system_prompt or "You are a friendly...",
-            introduction=call_request.agent.introduction or "Hello! I'm your AI assistant...",
-        ),
-    )
+```jsx
+cartesia auth login
+cartesia init
 ```
 
-## Key Concepts
+4. Start your agent server.
 
-- **`VoiceAgentApp`**: The main application wrapper that handles WebSocket connections
-- **`get_agent`**: Factory function called for each new call to create an agent instance
-- **`LlmConfig`**: Configuration for the agent's behavior (system prompt, introduction)
-- **`end_call`**: A passthrough tool that sends a goodbye message and ends the call
+```bash
+uv sync
+ANTHROPIC_API_KEY=your-api-key PORT=8000 uv run python main.py
+```
+
+5. In a separate terminal, chat with your agent by simply running:
+
+```bash
+cartesia chat 8000 # test your agent's reasoning in text
+```
+
+6. Commit your changes to `main` and `git push`. Cartesia will auto-deploy your `main` branch.
