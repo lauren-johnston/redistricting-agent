@@ -24,27 +24,28 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 2. Create a [Cartesia API key](https://play.cartesia.ai/keys). You will need this in the next step.
 3. Get a [Google Maps API key](https://console.cloud.google.com/apis/credentials) and enable the "Geocoding API".
-4. Authenticate into Cartesia and initialize a project. You can link this project to an agent you created.
+4. Set up Notion: Create a "Community of Interest Submissions" database and get your Notion secret and database ID (see `NOTION_SETUP.md`).
+5. Authenticate into Cartesia and initialize a project. You can link this project to an agent you created.
 
 ```jsx
 cartesia auth login
 cartesia init
 ```
 
-5. Start your agent server.
+6. Start your agent server.
 
 ```bash
 uv sync
-ANTHROPIC_API_KEY=your-anthropic-key GOOGLE_MAPS_API_KEY=your-google-maps-key PORT=8000 uv run python main.py
+ANTHROPIC_API_KEY=your-anthropic-key GOOGLE_MAPS_API_KEY=your-google-maps-key NOTION_SECRET=your-notion-secret NOTION_SUBMISSIONS_DB_ID=your-db-id REDISTRICTING_CRITERIA_DB_ID=your-criteria-db-id PORT=8000 uv run python main.py
 ```
 
-6. In a separate terminal, chat with your agent by simply running:
+7. In a separate terminal, chat with your agent by simply running:
 
 ```bash
 cartesia chat 8000 # test your agent's reasoning in text
 ```
 
-7. Commit your changes to `main` and `git push`. Cartesia will auto-deploy your `main` branch.
+8. Commit your changes to `main` and `git push`. Cartesia will auto-deploy your `main` branch.
 
 ## Testing
 
@@ -79,7 +80,12 @@ See `tests/README.md` for detailed testing information.
 4. Document cultural, economic, and social interests
 5. Capture other considerations for redistricting
 
+## Data Storage
+All submissions are stored in Notion with:
+- Form answers (community details, cultural/economic interests)
+- Geocoded coordinates and landmarks
+- Polygon map image (Google Static Maps)
+- GeoJSON for boundary visualization
+
 ## Future Integration
-- **Database**: Store form submissions (Supabase recommended)
-- **Mapping**: Convert verbal descriptions to polygons (Google Maps)
 - **District lookup**: Show current districts by zipcode
