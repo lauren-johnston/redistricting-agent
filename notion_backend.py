@@ -241,6 +241,121 @@ async def save_submission(answers: dict) -> str:
         return f"Error saving to Notion: {e}"
 
 
+def _get_redistricting_db_id() -> str:
+    return os.getenv("REDISTRICTING_CRITERIA_DB_ID", "")
+
+# Zipcode prefix → state mapping (first 3 digits)
+
+
+def _init_zip_to_state():
+    """Build zipcode-prefix-to-state mapping."""
+    if _ZIP_TO_STATE:
+        return
+    # Ranges: (start, end, state)  — covers all US zip prefixes
+    ranges = [
+        ("005", "009", "Puerto Rico"), ("010", "027", "Massachusetts"),
+        ("028", "029", "Rhode Island"), ("030", "038", "New Hampshire"),
+        ("039", "049", "Maine"), ("050", "059", "Vermont"),
+        ("060", "069", "Connecticut"), ("070", "089", "New Jersey"),
+        ("100", "149", "New York"), ("150", "196", "Pennsylvania"),
+        ("197", "199", "Delaware"), ("200", "205", "District of Columbia"),
+        ("206", "219", "Maryland"), ("220", "246", "Virginia"),
+        ("247", "268", "West Virginia"), ("270", "289", "North Carolina"),
+        ("290", "299", "South Carolina"), ("300", "319", "Georgia"),
+        ("320", "349", "Florida"), ("350", "369", "Alabama"),
+        ("370", "385", "Tennessee"), ("386", "397", "Mississippi"),
+        ("400", "427", "Kentucky"), ("430", "459", "Ohio"),
+        ("460", "479", "Indiana"), ("480", "499", "Michigan"),
+        ("500", "528", "Iowa"), ("530", "549", "Wisconsin"),
+        ("550", "567", "Minnesota"), ("570", "577", "South Dakota"),
+        ("580", "588", "North Dakota"), ("590", "599", "Montana"),
+        ("600", "629", "Illinois"), ("630", "658", "Missouri"),
+        ("660", "679", "Kansas"), ("680", "693", "Nebraska"),
+        ("700", "714", "Louisiana"), ("716", "729", "Arkansas"),
+        ("730", "749", "Oklahoma"), ("750", "799", "Texas"),
+        ("800", "816", "Colorado"), ("820", "831", "Wyoming"),
+        ("832", "838", "Idaho"), ("840", "847", "Utah"),
+        ("850", "865", "Arizona"), ("870", "884", "New Mexico"),
+        ("889", "898", "Nevada"), ("900", "961", "California"),
+        ("962", "966", "Military"), ("967", "968", "Hawaii"),
+        ("970", "979", "Oregon"), ("980", "994", "Washington"),
+        ("995", "999", "Alaska"),
+    ]
+    for start, end, state in ranges:
+        for prefix in range(int(start), int(end) + 1):
+            _ZIP_TO_STATE[f"{prefix:03d}"] = state
+
+
+def _zip_to_state(zipcode: str) -> str | None:
+    """Convert a US zipcode to a state name."""
+    _init_zip_to_state()
+    clean = zipcode.strip().replace("-", "")[:5]
+    if len(clean) < 3:
+        return None
+    return _ZIP_TO_STATE.get(clean[:3])
+
+
+async def _lookup_coi_required(state: str) -> dict | None:
+    """Query the 2020 Redistricting Criteria Notion DB for a state."""
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.post(
+            f"{NOTION_API_URL}/databases/{_get_redistricting_db_id()}/query",
+            headers=_headers(),
+            json={
+                "filter": {
+                    "property": "State",
+                    "title": {"equals": state},
+                },
+            },
+        )
+        data = resp.json()
+        results = data.get("results", [])
+        if not results:
+            return None
+
+        props = results[0]["properties"]
+        coi_required = props.get("Communities of Interest Required", {}).get("checkbox", False)
+        notes_parts = props.get("Notes", {}).get("rich_text", [])
+        notes = "".join(t.get("plain_text", "") for t in notes_parts)
+        return {"state": state, "coi_required": coi_required, "notes": notes}
+
+
+@loopback_tool(is_background=True)
+async def check_coi_requirement(
+    ctx: ToolEnv,
+    zipcode: Annotated[str, "The caller's zip code"],
+):
+    """Look up whether the caller's state requires communities of interest
+    in redistricting. Call this right after recording the zipcode answer."""
+    state = _zip_to_state(zipcode)
+    if not state:
+        yield f"Could not determine state from zip code {zipcode}."
+        return
+
+    yield f"Looking up redistricting criteria for {state}..."
+
+    result = await _lookup_coi_required(state)
+    if result is None:
+        yield f"State: {state}. Could not find redistricting criteria data for this state."
+        return
+
+    if result["coi_required"]:
+        msg = (
+            f"State: {state}. Communities of interest ARE required to be considered "
+            f"in redistricting for this state."
+        )
+    else:
+        msg = (
+            f"State: {state}. Communities of interest are NOT formally required "
+            f"in redistricting for this state, but the caller's input is still valuable."
+        )
+
+    if result["notes"]:
+        msg += f" Notes: {result['notes']}"
+
+    yield msg
+
+
 @loopback_tool(is_background=True)
 async def save_to_notion(
     ctx: ToolEnv,

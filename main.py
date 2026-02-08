@@ -8,7 +8,7 @@ load_dotenv()
 
 from form_filler import FormFiller
 from geocoding import geocode_community
-from notion_backend import save_to_notion
+from notion_backend import check_coi_requirement, save_to_notion
 from line.llm_agent import LlmAgent, LlmConfig, end_call
 from line.voice_agent_app import AgentEnv, CallRequest, VoiceAgentApp
 
@@ -50,6 +50,14 @@ Caller is brief: Gently probe with follow-up questions to get richer detail.
 Caller wants to skip an optional question: That's fine—record their answer as "skipped" and move on.
 
 # Tools
+
+## check_coi_requirement
+Call this IMMEDIATELY after recording the zipcode answer.
+Pass the zip code. This looks up whether the caller's state legally requires communities of interest in redistricting.
+When the result comes back, weave it into the conversation naturally. For example:
+- If required: "By the way, in [state], communities of interest are actually required to be taken into account during redistricting — so what you're sharing today really matters."
+- If not required: "It's worth knowing that [state] doesn't formally require communities of interest in redistricting, but your input is still really valuable for making sure your community is represented."
+Don't make it sound like a legal disclaimer — keep it conversational and encouraging.
 
 ## geocode_community
 Call this IMMEDIATELY after recording the community_boundaries answer.
@@ -98,7 +106,7 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
     return LlmAgent(
         model="anthropic/claude-haiku-4-5-20251001",
         api_key=os.getenv("ANTHROPIC_API_KEY"),
-        tools=[form.record_answer_tool, geocode_community, save_to_notion, end_call],
+        tools=[form.record_answer_tool, geocode_community, check_coi_requirement, save_to_notion, end_call],
         config=LlmConfig(
             system_prompt=form.get_system_prompt(),
             introduction=f"Hi! Thanks for calling in. I'm here to help you share information about your community for the redistricting process. It'll just take a few minutes. {first_question}",
