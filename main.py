@@ -3,12 +3,13 @@ from pathlib import Path
 from typing import Annotated
 
 from dotenv import load_dotenv
+import httpx
 from loguru import logger
 
 load_dotenv()
 
 from form_filler import FormFiller
-from geocoding import geocode_community
+from geocoding import _geocode, _center_point, _bounding_box_area_sq_miles
 from notion_backend import check_coi_requirement, save_submission
 from line.llm_agent import ToolEnv, loopback_tool
 from line.llm_agent import LlmAgent, LlmConfig, end_call
@@ -71,9 +72,7 @@ If they correct something, note it and move on.
 
 ## save_to_notion
 Call this AFTER the user confirms the summary and BEFORE calling end_call.
-Pass ONLY the geographic data from geocode_community as a JSON string with these keys:
-- geographic_summary, primary_address, geocoded_landmarks, all_coordinates
-The form answers are saved automatically — you only need to pass the geo extras.
+No arguments needed — it automatically saves all form answers and geographic data.
 Keep chatting naturally while it saves.
 
 ## end_call
@@ -82,7 +81,7 @@ Use after save_to_notion completes AND the caller confirms the summary, OR if th
 Process (normal completion):
 1. Summarize all the community information you've collected, including the geographic details
 2. Ask if everything sounds right
-3. Call save_to_notion with the geographic extras JSON
+3. Call save_to_notion (no arguments needed)
 4. Say a natural goodbye: "Thanks so much for sharing about your community—this really helps!"
 5. Then call end_call
 
@@ -96,29 +95,110 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
 
     form = FormFiller(str(FORM_PATH), system_prompt=SYSTEM_PROMPT)
 
-    # Create save_to_notion as a closure so it can read form answers directly
-    # instead of requiring the LLM to serialize a huge JSON blob (which gets truncated)
+    # Shared dict for geocoding results — written by geocode_community, read by save_to_notion
+    geo_data: dict = {}
+
+    @loopback_tool(is_background=True)
+    async def geocode_community(
+        ctx: ToolEnv,
+        address: Annotated[str, "The caller's address or nearest intersection"],
+        zip_code: Annotated[str, "The caller's zip code"],
+        boundary_description: Annotated[
+            str,
+            "The caller's verbal description of their community boundaries",
+        ],
+        key_places: Annotated[
+            str,
+            "Key places the caller mentioned (grocery stores, parks, schools, etc.)",
+        ],
+    ):
+        """Geocode the caller's community boundaries to get geographic coordinates.
+        Call this AFTER recording the community_boundaries answer."""
+        yield "Looking up the geographic details for your community now..."
+
+        all_points: list[dict] = []
+        geocoded_landmarks: list[str] = []
+
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            primary = await _geocode(client, f"{address}, {zip_code}")
+            if primary:
+                all_points.append(primary)
+
+            boundary_parts = [
+                part.strip()
+                for part in boundary_description.replace(" and ", ", ")
+                .replace(" to ", ", ")
+                .replace(";", ",")
+                .split(",")
+                if part.strip() and len(part.strip()) > 2
+            ]
+            for landmark in boundary_parts[:6]:
+                geo = await _geocode(client, f"{landmark}, {zip_code}")
+                if geo:
+                    all_points.append(geo)
+                    geocoded_landmarks.append(f"{landmark} ({geo['formatted_address']})")
+
+            place_parts = [
+                part.strip()
+                for part in key_places.replace(" and ", ", ")
+                .replace(";", ",")
+                .split(",")
+                if part.strip() and len(part.strip()) > 2
+            ]
+            for place in place_parts[:4]:
+                geo = await _geocode(client, f"{place}, {zip_code}")
+                if geo:
+                    all_points.append(geo)
+
+        if not all_points:
+            yield (
+                "I wasn't able to pinpoint the exact location from the description. "
+                "That's okay though — the verbal description you gave is still really valuable."
+            )
+            return
+
+        import json
+        center = _center_point(all_points)
+        area = _bounding_box_area_sq_miles(all_points)
+
+        summary_parts = []
+        if primary:
+            summary_parts.append(f"Centered around {primary['formatted_address']}")
+        if area > 0:
+            summary_parts.append(f"roughly {area} square miles")
+        if geocoded_landmarks:
+            summary_parts.append(f"bounded by {', '.join(geocoded_landmarks[:4])}")
+
+        geographic_summary = " — ".join(summary_parts) if summary_parts else "Location identified"
+
+        # Store geo results so save_to_notion can access them directly
+        coords = [{"lat": p["lat"], "lng": p["lng"], "formatted_address": p["formatted_address"]} for p in all_points]
+        geo_data["geographic_summary"] = geographic_summary
+        geo_data["primary_address"] = primary["formatted_address"] if primary else ""
+        geo_data["geocoded_landmarks"] = "; ".join(geocoded_landmarks)
+        geo_data["all_coordinates"] = json.dumps(coords)
+
+        logger.info(f"Geocoding complete, stored {len(coords)} coordinates")
+
+        yield (
+            f"Geographic summary: {geographic_summary}. "
+            f"I mapped {len(all_points)} locations from your description. "
+            "Read this summary back to the caller naturally and ask if it sounds like "
+            "the right area. If they correct anything, note it but continue with the form."
+        )
+
     @loopback_tool(is_background=True)
     async def save_to_notion(
         ctx: ToolEnv,
-        geo_extras_json: Annotated[str, "JSON string with geographic data: geographic_summary, primary_address, geocoded_landmarks, all_coordinates"],
     ):
         """Save the completed community of interest form to the Notion database.
         Call this AFTER the user confirms the summary and BEFORE calling end_call.
-        Pass ONLY the geographic extras from geocode_community as JSON."""
-        import json
-
+        No arguments needed — form answers and geo data are saved automatically."""
         yield "Saving your submission now..."
 
-        # Start with all form answers collected so far
+        # Combine form answers + geo data
         answers = dict(form._answers)
-
-        # Merge in geographic extras from the LLM
-        try:
-            geo = json.loads(geo_extras_json)
-            answers.update(geo)
-        except (json.JSONDecodeError, TypeError):
-            logger.warning("Could not parse geo extras, saving form answers only")
+        answers.update(geo_data)
 
         result = await save_submission(answers)
         yield result
@@ -132,6 +212,7 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
         config=LlmConfig(
             system_prompt=form.get_system_prompt(),
             introduction=f"Hi! Thanks for calling in. I'm here to help you share information about your community for the redistricting process. It'll just take a few minutes. {first_question}",
+            max_tokens=4096,
         ),
     )
 
