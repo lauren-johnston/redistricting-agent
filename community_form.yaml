@@ -3,12 +3,17 @@ questionnaire:
   text: "Community of Interest for Redistricting"
   questions:
     - id: "caller_name"
-      text: "Can I get your name?"
+      text: "Can I get your full name?"
       type: "string"
-      required: false
+      required: true
 
     - id: "zipcode"
       text: "What's your zip code?"
+      type: "string"
+      required: true
+
+    - id: "address"
+      text: "What's your address? Or if you prefer, the nearest cross streets or intersection."
       type: "string"
       required: true
 
