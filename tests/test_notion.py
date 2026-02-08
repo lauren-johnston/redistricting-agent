@@ -5,11 +5,13 @@ Quick test of the Notion integration.
 
 import asyncio
 import os
+import sys
 from dotenv import load_dotenv
 
-load_dotenv()
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 
-from notion_backend import save_submission, _find_or_create_database
+from notion_backend import save_submission, _get_submissions_db_id
 
 
 async def test_notion():
@@ -23,12 +25,12 @@ async def test_notion():
     
     print(f"✅ Found NOTION_SECRET: {token[:10]}...")
     
-    # Test database creation/finding
+    # Test database ID from env
     try:
-        db_id = await _find_or_create_database()
+        db_id = _get_submissions_db_id()
         print(f"✅ Database ID: {db_id}")
     except Exception as e:
-        print(f"❌ Database setup failed: {e}")
+        print(f"❌ NOTION_SUBMISSIONS_DB_ID not set: {e}")
         return
     
     # Test saving a sample submission

@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from typing import Annotated
 
 from dotenv import load_dotenv
 from loguru import logger
@@ -8,7 +9,8 @@ load_dotenv()
 
 from form_filler import FormFiller
 from geocoding import geocode_community
-from notion_backend import check_coi_requirement, save_to_notion
+from notion_backend import check_coi_requirement, save_submission
+from line.llm_agent import ToolEnv, loopback_tool
 from line.llm_agent import LlmAgent, LlmConfig, end_call
 from line.voice_agent_app import AgentEnv, CallRequest, VoiceAgentApp
 
@@ -69,17 +71,10 @@ If they correct something, note it and move on.
 
 ## save_to_notion
 Call this AFTER the user confirms the summary and BEFORE calling end_call.
-Pass ALL collected answers as a JSON string, including:
-- All form answers from the "completed" dict
-- PLUS the geographic data from geocode_community: geographic_summary, primary_address
-- PLUS the coordinate data: geocoded_landmarks (list), all_coordinates (JSON string of coordinates)
-This saves their submission to our database. Keep chatting naturally while it saves.
-
-IMPORTANT: The geocode_community tool returns structured data including coordinates in GeoJSON format. Extract these fields for saving:
-- geographic_summary (natural language description)
-- primary_address (formatted address)
-- geocoded_landmarks (array of landmark descriptions)
-- all_coordinates (JSON string of all coordinate points for bounding box calculations)
+Pass ONLY the geographic data from geocode_community as a JSON string with these keys:
+- geographic_summary, primary_address, geocoded_landmarks, all_coordinates
+The form answers are saved automatically — you only need to pass the geo extras.
+Keep chatting naturally while it saves.
 
 ## end_call
 Use after save_to_notion completes AND the caller confirms the summary, OR if the caller declines consent.
@@ -87,7 +82,7 @@ Use after save_to_notion completes AND the caller confirms the summary, OR if th
 Process (normal completion):
 1. Summarize all the community information you've collected, including the geographic details
 2. Ask if everything sounds right
-3. Call save_to_notion with all the collected answers as JSON
+3. Call save_to_notion with the geographic extras JSON
 4. Say a natural goodbye: "Thanks so much for sharing about your community—this really helps!"
 5. Then call end_call
 
@@ -100,6 +95,33 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
     logger.info(f"Starting community form call: {call_request.call_id}")
 
     form = FormFiller(str(FORM_PATH), system_prompt=SYSTEM_PROMPT)
+
+    # Create save_to_notion as a closure so it can read form answers directly
+    # instead of requiring the LLM to serialize a huge JSON blob (which gets truncated)
+    @loopback_tool(is_background=True)
+    async def save_to_notion(
+        ctx: ToolEnv,
+        geo_extras_json: Annotated[str, "JSON string with geographic data: geographic_summary, primary_address, geocoded_landmarks, all_coordinates"],
+    ):
+        """Save the completed community of interest form to the Notion database.
+        Call this AFTER the user confirms the summary and BEFORE calling end_call.
+        Pass ONLY the geographic extras from geocode_community as JSON."""
+        import json
+
+        yield "Saving your submission now..."
+
+        # Start with all form answers collected so far
+        answers = dict(form._answers)
+
+        # Merge in geographic extras from the LLM
+        try:
+            geo = json.loads(geo_extras_json)
+            answers.update(geo)
+        except (json.JSONDecodeError, TypeError):
+            logger.warning("Could not parse geo extras, saving form answers only")
+
+        result = await save_submission(answers)
+        yield result
 
     first_question = form.get_current_question_text()
 

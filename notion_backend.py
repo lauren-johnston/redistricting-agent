@@ -15,10 +15,6 @@ from line.llm_agent import ToolEnv, loopback_tool
 NOTION_API_URL = "https://api.notion.com/v1"
 NOTION_VERSION = "2022-06-28"
 
-# Stored after first creation so we don't recreate each time
-_database_id: str | None = None
-
-
 def _headers() -> dict:
     token = os.getenv("NOTION_SECRET", "")
     return {
@@ -28,38 +24,15 @@ def _headers() -> dict:
     }
 
 
-async def _find_or_create_database() -> str:
-    """Find existing 'Community of Interest Submissions' database.
-    
-    For now, you need to manually create a database in Notion with the name
-    'Community of Interest Submissions' and the required properties.
-    """
-    global _database_id
-    if _database_id:
-        return _database_id
-
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        # Search for existing database
-        resp = await client.post(
-            f"{NOTION_API_URL}/search",
-            headers=_headers(),
-            json={
-                "query": "Community of Interest Submissions",
-                "filter": {"value": "database", "property": "object"},
-            },
-        )
-        data = resp.json()
-        if data.get("results"):
-            _database_id = data["results"][0]["id"]
-            logger.info(f"Found existing Notion database: {_database_id}")
-            return _database_id
-        
-        # If no database found, raise an error with instructions
+def _get_submissions_db_id() -> str:
+    """Get the submissions database ID from env var."""
+    db_id = os.getenv("NOTION_SUBMISSIONS_DB_ID", "")
+    if not db_id:
         raise Exception(
-            "No 'Community of Interest Submissions' database found in Notion. "
-            "Please create it manually in Notion with these properties:\n"
-            "- Name (title)\n- Phone (phone number)\n- Zip Code (text)\n- Address (text)\n- Community Name (text)\n- Community Description (text)\n- Key Places (text)\n- Community Boundaries (text)\n- Cultural Interests (text)\n- Economic Interests (text)\n- Community Activities (text)\n- Other Considerations (text)\n- Consent (checkbox)"
+            "NOTION_SUBMISSIONS_DB_ID not set. Add it to your .env file "
+            "and (if deployed) run: cartesia env set --from .env"
         )
+    return db_id
 
 
 def _rich_text(value: str) -> dict:
@@ -166,7 +139,7 @@ def _generate_static_map_url(answers: dict) -> str | None:
 async def save_submission(answers: dict) -> str:
     """Save a completed form submission to Notion. Returns the page URL or error."""
     try:
-        db_id = await _find_or_create_database()
+        db_id = _get_submissions_db_id()
 
         properties = {
             "Name": {"title": [{"text": {"content": answers.get("caller_name", "Unknown")}}]},
@@ -357,24 +330,3 @@ async def check_coi_requirement(
     yield msg
 
 
-@loopback_tool(is_background=True)
-async def save_to_notion(
-    ctx: ToolEnv,
-    submission_json: Annotated[str, "JSON string of all collected form answers"],
-):
-    """Save the completed community of interest form to the Notion database.
-    Call this AFTER the user confirms the summary and BEFORE calling end_call.
-    Pass all the collected answers as a JSON string.
-    """
-    import json
-
-    yield "Saving your submission now..."
-
-    try:
-        answers = json.loads(submission_json)
-    except json.JSONDecodeError:
-        yield "There was an issue saving, but don't worry — your information has been recorded."
-        return
-
-    result = await save_submission(answers)
-    yield result
