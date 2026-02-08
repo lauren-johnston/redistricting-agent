@@ -19,6 +19,22 @@ from line.voice_agent_app import AgentEnv, CallRequest, VoiceAgentApp
 
 FORM_PATH = Path(__file__).parent / "community_form.yaml"
 
+DEMO_ANSWERS = {
+    "consent": True,
+    "caller_name": "Lauren James",
+    "zipcode": "94110",
+    "address": "24th and Mission",
+    "community_name": "Mission District",
+    "community_description": "Majority Latino, lots of churches",
+    "key_places": "Mission Dolores Park, the school next to it, Mission St, 24th and Mission",
+    "community_boundaries": "Bernal, SOMA, Hayes, Castro are neighboring. Market St is also a barrier",
+    "cultural_interests": "Predominant Latino, immigration concerns, affordable housing, drug use, public transit",
+    "economic_interests": "Poor, service industry, gentrification and unemployment concerns",
+    "community_activities": "Lots of churches (e.g. on Mission St), public transit",
+    "other_considerations": "no",
+    "phone_number": "555-0000",
+}
+
 SYSTEM_PROMPT = """You are a friendly voice assistant helping people share their community of interest for the redistricting process.
 
 # What is a Community of Interest?
@@ -74,6 +90,11 @@ If they correct something, note it and move on.
 Call this AFTER the user confirms the summary and BEFORE calling end_call.
 No arguments needed — it automatically saves all form answers and geographic data.
 Keep chatting naturally while it saves.
+
+## run_demo
+If the caller says "demo", "run demo", "skip to demo", or "demo mode" at ANY point, call this immediately.
+It autopopulates the form with sample data about the Mission District in San Francisco, runs geocoding, and saves to Notion.
+After it completes, read back the summary naturally and then call end_call.
 
 ## end_call
 Use after save_to_notion completes AND the caller confirms the summary, OR if the caller declines consent.
@@ -188,6 +209,76 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
         )
 
     @loopback_tool(is_background=True)
+    async def run_demo(ctx: ToolEnv):
+        """Run a demo with sample Mission District data. Call this when the caller says 'demo' or 'run demo'.
+        This autopopulates the form, geocodes, and saves to Notion. No arguments needed."""
+        import json
+
+        yield "Running the demo with sample Mission District data..."
+
+        # Populate form answers
+        for key, value in DEMO_ANSWERS.items():
+            form._answers[key] = value
+        form._current_index = len(form._questions)
+        logger.info(f"Demo: populated {len(DEMO_ANSWERS)} answers")
+
+        # Run geocoding
+        yield "Geocoding the community boundaries..."
+        all_points: list[dict] = []
+        geocoded_landmarks: list[str] = []
+        zip_code = DEMO_ANSWERS["zipcode"]
+        address = DEMO_ANSWERS["address"]
+
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            primary = await _geocode(client, f"{address}, {zip_code}")
+            if primary:
+                all_points.append(primary)
+
+            for landmark in ["Market St", "Bernal Heights", "SOMA", "Castro"]:
+                geo = await _geocode(client, f"{landmark}, {zip_code}")
+                if geo:
+                    all_points.append(geo)
+                    geocoded_landmarks.append(f"{landmark} ({geo['formatted_address']})")
+
+            for place in ["Mission Dolores Park", "24th and Mission"]:
+                geo = await _geocode(client, f"{place}, {zip_code}")
+                if geo:
+                    all_points.append(geo)
+
+        if all_points:
+            center = _center_point(all_points)
+            area = _bounding_box_area_sq_miles(all_points)
+            summary_parts = []
+            if primary:
+                summary_parts.append(f"Centered around {primary['formatted_address']}")
+            if area > 0:
+                summary_parts.append(f"roughly {area} square miles")
+            if geocoded_landmarks:
+                summary_parts.append(f"bounded by {', '.join(geocoded_landmarks[:4])}")
+            geographic_summary = " — ".join(summary_parts) if summary_parts else "Location identified"
+
+            coords = [{"lat": p["lat"], "lng": p["lng"], "formatted_address": p["formatted_address"]} for p in all_points]
+            geo_data["geographic_summary"] = geographic_summary
+            geo_data["primary_address"] = primary["formatted_address"] if primary else ""
+            geo_data["geocoded_landmarks"] = "; ".join(geocoded_landmarks)
+            geo_data["all_coordinates"] = json.dumps(coords)
+            logger.info(f"Demo: geocoded {len(coords)} points")
+
+        # Save to Notion
+        yield "Saving demo submission to Notion..."
+        answers = dict(form._answers)
+        answers.update(geo_data)
+        result = await save_submission(answers)
+
+        yield (
+            f"Demo complete! {result} "
+            f"Here's what was submitted: Lauren James from the Mission District (94110). "
+            f"Community is majority Latino with churches, bounded by Market St, Bernal, SOMA, and Castro. "
+            f"Geographic summary: {geo_data.get('geographic_summary', 'N/A')}. "
+            "Read this summary to the caller and then call end_call."
+        )
+
+    @loopback_tool(is_background=True)
     async def save_to_notion(
         ctx: ToolEnv,
     ):
@@ -208,7 +299,7 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
     return LlmAgent(
         model="anthropic/claude-haiku-4-5-20251001",
         api_key=os.getenv("ANTHROPIC_API_KEY"),
-        tools=[form.record_answer_tool, geocode_community, check_coi_requirement, save_to_notion, end_call],
+        tools=[form.record_answer_tool, geocode_community, check_coi_requirement, save_to_notion, run_demo, end_call],
         config=LlmConfig(
             system_prompt=form.get_system_prompt(),
             introduction=f"Hi! Thanks for calling in. I'm here to help you share information about your community for the redistricting process. It'll just take a few minutes. {first_question}",
