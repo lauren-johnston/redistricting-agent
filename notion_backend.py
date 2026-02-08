@@ -245,6 +245,7 @@ def _get_redistricting_db_id() -> str:
     return os.getenv("REDISTRICTING_CRITERIA_DB_ID", "")
 
 # Zipcode prefix → state mapping (first 3 digits)
+_ZIP_TO_STATE: dict[str, str] = {}
 
 
 def _init_zip_to_state():
