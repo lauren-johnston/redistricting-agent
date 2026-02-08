@@ -214,7 +214,7 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
         This autopopulates the form, geocodes, and saves to Notion. No arguments needed."""
         import json
 
-        yield "Running the demo with sample Mission District data..."
+        yield "Running the demo now — one moment while I set everything up."
 
         # Populate form answers
         for key, value in DEMO_ANSWERS.items():
@@ -223,7 +223,6 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
         logger.info(f"Demo: populated {len(DEMO_ANSWERS)} answers")
 
         # Run geocoding
-        yield "Geocoding the community boundaries..."
         all_points: list[dict] = []
         geocoded_landmarks: list[str] = []
         zip_code = DEMO_ANSWERS["zipcode"]
@@ -245,8 +244,8 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
                 if geo:
                     all_points.append(geo)
 
+        geographic_summary = "Location identified"
         if all_points:
-            center = _center_point(all_points)
             area = _bounding_box_area_sq_miles(all_points)
             summary_parts = []
             if primary:
@@ -255,7 +254,7 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
                 summary_parts.append(f"roughly {area} square miles")
             if geocoded_landmarks:
                 summary_parts.append(f"bounded by {', '.join(geocoded_landmarks[:4])}")
-            geographic_summary = " — ".join(summary_parts) if summary_parts else "Location identified"
+            geographic_summary = " — ".join(summary_parts) if summary_parts else geographic_summary
 
             coords = [{"lat": p["lat"], "lng": p["lng"], "formatted_address": p["formatted_address"]} for p in all_points]
             geo_data["geographic_summary"] = geographic_summary
@@ -265,17 +264,16 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
             logger.info(f"Demo: geocoded {len(coords)} points")
 
         # Save to Notion
-        yield "Saving demo submission to Notion..."
         answers = dict(form._answers)
         answers.update(geo_data)
         result = await save_submission(answers)
 
         yield (
-            f"Demo complete! {result} "
-            f"Here's what was submitted: Lauren James from the Mission District (94110). "
-            f"Community is majority Latino with churches, bounded by Market St, Bernal, SOMA, and Castro. "
-            f"Geographic summary: {geo_data.get('geographic_summary', 'N/A')}. "
-            "Read this summary to the caller and then call end_call."
+            f"Demo complete! {result}. "
+            f"Submitted for Lauren James from the Mission District (94110). "
+            f"Community is majority Latino with churches. "
+            f"{geographic_summary}. "
+            "Summarize this to the caller naturally and then call end_call."
         )
 
     @loopback_tool(is_background=True)
