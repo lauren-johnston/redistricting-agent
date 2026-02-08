@@ -5,9 +5,10 @@ description = "Voice agent for collecting community of interest data for redistr
 requires-python = ">=3.10"
 dependencies = [
     "cartesia-line==0.2.2",
+    "httpx>=0.27.0",
     "loguru>=0.7.0",
     "pyyaml>=6.0",
 ]
 
 [tool.setuptools]
-py-modules = ["main", "form_filler"]
+py-modules = ["main", "form_filler", "geocoding"]

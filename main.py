@@ -4,10 +4,11 @@ from pathlib import Path
 from loguru import logger
 
 from form_filler import FormFiller
+from geocoding import geocode_community
 from line.llm_agent import LlmAgent, LlmConfig, end_call
 from line.voice_agent_app import AgentEnv, CallRequest, VoiceAgentApp
 
-#  ANTHROPIC_API_KEY=your-key uv run python main.py
+#  ANTHROPIC_API_KEY=your-key GOOGLE_MAPS_API_KEY=your-key uv run python main.py
 
 FORM_PATH = Path(__file__).parent / "community_form.yaml"
 
@@ -40,11 +41,19 @@ Caller wants to skip an optional question: That's fine—record their answer as 
 
 # Tools
 
+## geocode_community
+Call this IMMEDIATELY after recording the community_boundaries answer.
+Pass in the address, zip_code, key_places, and boundary_description you've collected so far.
+This runs in the background—keep the conversation going while it processes.
+When the result comes back, naturally read the geographic summary to the caller:
+- "So it sounds like your community covers about X square miles around [area], bounded by [landmarks]—does that sound right?"
+If they correct something, note it and move on.
+
 ## end_call
 Use only after the form is complete AND the caller confirms the summary.
 
 Process:
-1. Summarize all the community information you've collected
+1. Summarize all the community information you've collected, including the geographic details
 2. Ask if everything sounds right
 3. Say a natural goodbye: "Thanks so much for sharing about your community—this really helps!"
 4. Then call end_call"""
@@ -60,7 +69,7 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
     return LlmAgent(
         model="anthropic/claude-haiku-4-5-20251001",
         api_key=os.getenv("ANTHROPIC_API_KEY"),
-        tools=[form.record_answer_tool, end_call],
+        tools=[form.record_answer_tool, geocode_community, end_call],
         config=LlmConfig(
             system_prompt=form.get_system_prompt(),
             introduction=f"Hi! Thanks for calling in. I'm here to help you share information about your community for the redistricting process. It'll just take a few minutes. {first_question}",

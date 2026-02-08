@@ -23,27 +23,46 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
 2. Create a [Cartesia API key](https://play.cartesia.ai/keys). You will need this in the next step.
-3. Authenticate into Cartesia and initialize a project. You can link this project to an agent you created.
+3. Get a [Google Maps API key](https://console.cloud.google.com/apis/credentials) and enable the "Geocoding API".
+4. Authenticate into Cartesia and initialize a project. You can link this project to an agent you created.
 
 ```jsx
 cartesia auth login
 cartesia init
 ```
 
-4. Start your agent server.
+5. Start your agent server.
 
 ```bash
 uv sync
-ANTHROPIC_API_KEY=your-api-key PORT=8000 uv run python main.py
+ANTHROPIC_API_KEY=your-anthropic-key GOOGLE_MAPS_API_KEY=your-google-maps-key PORT=8000 uv run python main.py
 ```
 
-5. In a separate terminal, chat with your agent by simply running:
+6. In a separate terminal, chat with your agent by simply running:
 
 ```bash
 cartesia chat 8000 # test your agent's reasoning in text
 ```
 
-6. Commit your changes to `main` and `git push`. Cartesia will auto-deploy your `main` branch.
+7. Commit your changes to `main` and `git push`. Cartesia will auto-deploy your `main` branch.
+
+## Testing
+
+The project includes test scripts for validating the geocoding functionality:
+
+```bash
+# Set your API key
+export GOOGLE_MAPS_API_KEY=your-key
+
+# Run geocoding tests
+uv run python tests/test_geocoding_simple.py
+uv run python tests/test_full_flow.py
+
+# Or run with inline key
+GOOGLE_MAPS_API_KEY=your-key uv run python tests/test_full_flow.py
+```
+
+See `tests/README.md` for detailed testing information.
 
 # Quick Reference
 
@@ -64,4 +83,3 @@ cartesia chat 8000 # test your agent's reasoning in text
 - **Database**: Store form submissions (Supabase recommended)
 - **Mapping**: Convert verbal descriptions to polygons (Google Maps)
 - **District lookup**: Show current districts by zipcode
-- **Census blocks**: Paint tool for precise boundaries
