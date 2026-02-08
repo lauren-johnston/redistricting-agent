@@ -5,6 +5,12 @@ Test the full geocoding flow with realistic user input.
 
 import asyncio
 import os
+import sys
+from pathlib import Path
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).parent.parent / ".env")
+
 import httpx
 from loguru import logger
 
@@ -50,8 +56,6 @@ def _bounding_box_area_sq_miles(points: list[dict]) -> float:
 
 async def test_realistic_scenario():
     """Test with realistic user input from the voice agent."""
-    
-    os.environ["GOOGLE_MAPS_API_KEY"] = "os.getenv("GOOGLE_MAPS_API_KEY")"
     
     print("🎯 Testing realistic scenario...")
     

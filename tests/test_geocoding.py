@@ -5,12 +5,14 @@ Quick test script for geocoding functionality without the full voice agent.
 
 import asyncio
 import os
+import sys
 from pathlib import Path
+from dotenv import load_dotenv
 
 # Add the project root to Python path so we can import modules
-project_root = Path(__file__).parent
-import sys
+project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
+load_dotenv(project_root / ".env")
 
 from geocoding import geocode_community
 # Access the actual function from the decorated tool
@@ -18,9 +20,6 @@ geocode_fn = geocode_community.fn
 
 async def test_geocoding():
     """Test the geocoding tool with sample data."""
-    
-    # Set environment variables for testing
-    os.environ["GOOGLE_MAPS_API_KEY"] = "os.getenv("GOOGLE_MAPS_API_KEY")"
     
     print("🧪 Testing geocoding tool...")
     

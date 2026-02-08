@@ -5,6 +5,11 @@ Simple test of the geocoding logic without the Line SDK decorators.
 
 import asyncio
 import os
+from pathlib import Path
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).parent.parent / ".env")
+
 import httpx
 from loguru import logger
 
