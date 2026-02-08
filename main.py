@@ -1,10 +1,14 @@
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
 from loguru import logger
+
+load_dotenv()
 
 from form_filler import FormFiller
 from geocoding import geocode_community
+from notion_backend import save_to_notion
 from line.llm_agent import LlmAgent, LlmConfig, end_call
 from line.voice_agent_app import AgentEnv, CallRequest, VoiceAgentApp
 
@@ -32,6 +36,12 @@ Ask one question at a time—don't overwhelm with multiple questions.
 Never use lists, bullet points, or structured formatting—speak in natural prose.
 Never say "Great question!" or other hollow affirmations.
 
+# Consent
+The FIRST question is about consent. You MUST obtain consent before proceeding.
+- If the caller says YES: record the answer and continue with the form.
+- If the caller says NO or declines: say "No problem at all — thanks for calling in. Have a good one!" and immediately call end_call. Do NOT ask any further questions.
+- If the caller is unsure: briefly explain that their info will be part of the public redistricting record and ask again. If they still decline, end the call politely.
+
 # Handling common situations
 Didn't catch something: "Sorry, I didn't catch that—could you say that again?"
 Caller seems unsure how to describe location: "Think about the places you go regularly—your grocery store, school, park, or place of worship. What are some of those spots?"
@@ -49,14 +59,33 @@ When the result comes back, naturally read the geographic summary to the caller:
 - "So it sounds like your community covers about X square miles around [area], bounded by [landmarks]—does that sound right?"
 If they correct something, note it and move on.
 
-## end_call
-Use only after the form is complete AND the caller confirms the summary.
+## save_to_notion
+Call this AFTER the user confirms the summary and BEFORE calling end_call.
+Pass ALL collected answers as a JSON string, including:
+- All form answers from the "completed" dict
+- PLUS the geographic data from geocode_community: geographic_summary, primary_address
+- PLUS the coordinate data: geocoded_landmarks (list), all_coordinates (JSON string of coordinates)
+This saves their submission to our database. Keep chatting naturally while it saves.
 
-Process:
+IMPORTANT: The geocode_community tool returns structured data including coordinates in GeoJSON format. Extract these fields for saving:
+- geographic_summary (natural language description)
+- primary_address (formatted address)
+- geocoded_landmarks (array of landmark descriptions)
+- all_coordinates (JSON string of all coordinate points for bounding box calculations)
+
+## end_call
+Use after save_to_notion completes AND the caller confirms the summary, OR if the caller declines consent.
+
+Process (normal completion):
 1. Summarize all the community information you've collected, including the geographic details
 2. Ask if everything sounds right
-3. Say a natural goodbye: "Thanks so much for sharing about your community—this really helps!"
-4. Then call end_call"""
+3. Call save_to_notion with all the collected answers as JSON
+4. Say a natural goodbye: "Thanks so much for sharing about your community—this really helps!"
+5. Then call end_call
+
+Process (consent declined):
+1. Thank them for calling
+2. Call end_call immediately (do NOT call save_to_notion)"""
 
 
 async def get_agent(env: AgentEnv, call_request: CallRequest):
@@ -69,7 +98,7 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
     return LlmAgent(
         model="anthropic/claude-haiku-4-5-20251001",
         api_key=os.getenv("ANTHROPIC_API_KEY"),
-        tools=[form.record_answer_tool, geocode_community, end_call],
+        tools=[form.record_answer_tool, geocode_community, save_to_notion, end_call],
         config=LlmConfig(
             system_prompt=form.get_system_prompt(),
             introduction=f"Hi! Thanks for calling in. I'm here to help you share information about your community for the redistricting process. It'll just take a few minutes. {first_question}",

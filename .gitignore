@@ -1,3 +1,4 @@
 /.cartesia
 /__pycache__
 /.agents
+.env

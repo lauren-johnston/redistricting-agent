@@ -2,6 +2,11 @@ questionnaire:
   id: "community_of_interest"
   text: "Community of Interest for Redistricting"
   questions:
+    - id: "consent"
+      text: "Before we get started, I need to let you know that the information you share will be used as part of the public redistricting process. Do I have your consent to collect and submit this information?"
+      type: "boolean"
+      required: true
+
     - id: "caller_name"
       text: "Can I get your full name?"
       type: "string"
@@ -56,3 +61,8 @@ questionnaire:
       text: "Is there anything else you'd want redistricting officials to know about why your community should be kept together in a single district?"
       type: "string"
       required: false
+
+    - id: "phone_number"
+      text: "Last thing — can I get a phone number where we could reach you if we need to verify any of this information?"
+      type: "string"
+      required: true

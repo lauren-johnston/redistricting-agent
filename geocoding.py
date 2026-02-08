@@ -168,6 +168,22 @@ async def geocode_community(
         "geocoded_landmarks": geocoded_landmarks,
         "primary_address": primary["formatted_address"] if primary else None,
         "summary": geographic_summary,
+        "coordinates": {
+            "type": "FeatureCollection",
+            "features": [
+                {
+                    "type": "Feature",
+                    "geometry": {
+                        "type": "Point",
+                        "coordinates": [point["lng"], point["lat"]],
+                    },
+                    "properties": {
+                        "formatted_address": point["formatted_address"],
+                    },
+                }
+                for point in all_points
+            ],
+        },
     }
 
     logger.info(f"Geocoding complete: {result}")
