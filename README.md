@@ -6,6 +6,12 @@ Although this tool was used successfully in several states during the 2020 redis
 
 In 2026, realistic voice agents with tool calling have made it possible to collect community data from the public with only a phone call. For the next redistricting cycle, we want everyone to be able to contribute.
 
+First, call the voice agent (active for a limited time at+1(385)492-6497):
+![Voice agent call](images/voice-agent-call.png)
+
+Then a submission will be created in Notion like this one:
+![Notion submission](images/notion-submission.png)
+
 # How to use
 
 ## Prequisites
