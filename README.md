@@ -44,3 +44,24 @@ cartesia chat 8000 # test your agent's reasoning in text
 ```
 
 6. Commit your changes to `main` and `git push`. Cartesia will auto-deploy your `main` branch.
+
+# Quick Reference
+
+## Redistricting Basics
+- **Main districts**: Congressional, State Senate, State House (redrawn every 10 years)
+- **Goal**: Keep communities of interest together in single districts
+- **Problem**: Gerrymandering splits communities for political advantage
+- **Solution**: Collect community data to challenge unfair maps
+
+## Agent Workflow
+1. Collect caller name (optional) and zipcode
+2. Get community name and description
+3. Gather location data (key places, boundaries)
+4. Document cultural, economic, and social interests
+5. Capture other considerations for redistricting
+
+## Future Integration
+- **Database**: Store form submissions (Supabase recommended)
+- **Mapping**: Convert verbal descriptions to polygons (Google Maps)
+- **District lookup**: Show current districts by zipcode
+- **Census blocks**: Paint tool for precise boundaries
