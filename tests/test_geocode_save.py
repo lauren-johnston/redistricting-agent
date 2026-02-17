@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Quick test: geocode a community and save to Notion with geo data.
+Quick test: geocode a community and save to Supabase with geo data.
 Verifies that landmarks, coordinates, GeoJSON, and polygon map all save correctly.
 """
 
@@ -16,11 +16,11 @@ load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 
 import httpx
 from geocoding import _geocode, _center_point, _bounding_box_area_sq_miles
-from notion_backend import save_submission
+from supabase_backend import save_submission
 
 
 async def test_geocode_and_save():
-    print("=== Test: Geocode + Save to Notion ===\n")
+    print("=== Test: Geocode + Save to Supabase ===\n")
 
     zip_code = "94110"
     address = "24th and Mission"
@@ -73,8 +73,8 @@ async def test_geocode_and_save():
     print(f"   Summary: {geographic_summary}")
     print(f"   Coordinates: {len(coords)} points")
 
-    # 3. Save to Notion
-    print("\n3. Saving to Notion...")
+    # 3. Save to Supabase
+    print("\n3. Saving to Supabase...")
     answers = {
         "consent": True,
         "caller_name": "Test Geocode",
@@ -105,7 +105,7 @@ async def test_geocode_and_save():
     print(f"   ✅ {len(geocoded_landmarks)} landmarks encoded")
     print(f"   {'✅' if area > 0 else '❌'} Area: {area} sq miles")
     print(f"   {'✅' if len(coords) >= 3 else '❌'} Enough coords for polygon: {len(coords)}")
-    print(f"\n   Check Notion for: polygon map image, GeoJSON field, coordinates")
+    print(f"\n   Check Supabase for: polygon map image, GeoJSON field, coordinates")
 
 
 if __name__ == "__main__":

@@ -10,7 +10,7 @@ load_dotenv()
 
 from form_filler import FormFiller
 from geocoding import _geocode, _center_point, _bounding_box_area_sq_miles
-from notion_backend import check_coi_requirement, save_submission
+from supabase_backend import check_coi_requirement, save_submission
 from line.llm_agent import ToolEnv, loopback_tool
 from line.llm_agent import LlmAgent, LlmConfig, end_call
 from line.voice_agent_app import AgentEnv, CallRequest, VoiceAgentApp
@@ -86,29 +86,29 @@ When the result comes back, naturally read the geographic summary to the caller:
 - "So it sounds like your community covers about X square miles around [area], bounded by [landmarks]—does that sound right?"
 If they correct something, note it and move on.
 
-## save_to_notion
+## save_submission_tool
 Call this AFTER the user confirms the summary and BEFORE calling end_call.
 No arguments needed — it automatically saves all form answers and geographic data.
 Keep chatting naturally while it saves.
 
 ## run_demo
 If the caller says "demo", "run demo", "skip to demo", or "demo mode" at ANY point, call this immediately.
-It autopopulates the form with sample data about the Mission District in San Francisco, runs geocoding, and saves to Notion.
+It autopopulates the form with sample data about the Mission District in San Francisco, runs geocoding, and saves to the database.
 After it completes, read back the summary naturally and then call end_call.
 
 ## end_call
-Use after save_to_notion completes AND the caller confirms the summary, OR if the caller declines consent.
+Use after save_submission_tool completes AND the caller confirms the summary, OR if the caller declines consent.
 
 Process (normal completion):
 1. Summarize all the community information you've collected, including the geographic details
 2. Ask if everything sounds right
-3. Call save_to_notion (no arguments needed)
+3. Call save_submission_tool (no arguments needed)
 4. Say a natural goodbye: "Thanks so much for sharing about your community—this really helps!"
 5. Then call end_call
 
 Process (consent declined):
 1. Thank them for calling
-2. Call end_call immediately (do NOT call save_to_notion)"""
+2. Call end_call immediately (do NOT call save_submission_tool)"""
 
 
 async def get_agent(env: AgentEnv, call_request: CallRequest):
@@ -116,7 +116,7 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
 
     form = FormFiller(str(FORM_PATH), system_prompt=SYSTEM_PROMPT)
 
-    # Shared dict for geocoding results — written by geocode_community, read by save_to_notion
+    # Shared dict for geocoding results — written by geocode_community, read by save_submission_tool
     geo_data: dict = {}
 
     @loopback_tool(is_background=True)
@@ -192,7 +192,7 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
 
         geographic_summary = " — ".join(summary_parts) if summary_parts else "Location identified"
 
-        # Store geo results so save_to_notion can access them directly
+        # Store geo results so save_submission_tool can access them directly
         coords = [{"lat": p["lat"], "lng": p["lng"], "formatted_address": p["formatted_address"]} for p in all_points]
         geo_data["geographic_summary"] = geographic_summary
         geo_data["primary_address"] = primary["formatted_address"] if primary else ""
@@ -211,7 +211,7 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
     @loopback_tool(is_background=True)
     async def run_demo(ctx: ToolEnv):
         """Run a demo with sample Mission District data. Call this when the caller says 'demo' or 'run demo'.
-        This autopopulates the form, geocodes, and saves to Notion. No arguments needed."""
+        This autopopulates the form, geocodes, and saves to the database. No arguments needed."""
         import json
 
         yield "Running the demo now — one moment while I set everything up."
@@ -263,7 +263,7 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
             geo_data["all_coordinates"] = json.dumps(coords)
             logger.info(f"Demo: geocoded {len(coords)} points")
 
-        # Save to Notion
+        # Save to database
         answers = dict(form._answers)
         answers.update(geo_data)
         result = await save_submission(answers)
@@ -277,10 +277,10 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
         )
 
     @loopback_tool(is_background=True)
-    async def save_to_notion(
+    async def save_submission_tool(
         ctx: ToolEnv,
     ):
-        """Save the completed community of interest form to the Notion database.
+        """Save the completed community of interest form to the database.
         Call this AFTER the user confirms the summary and BEFORE calling end_call.
         No arguments needed — form answers and geo data are saved automatically."""
         yield "Saving your submission now..."
@@ -297,7 +297,7 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
     return LlmAgent(
         model="anthropic/claude-haiku-4-5-20251001",
         api_key=os.getenv("ANTHROPIC_API_KEY"),
-        tools=[form.record_answer_tool, geocode_community, check_coi_requirement, save_to_notion, run_demo, end_call],
+        tools=[form.record_answer_tool, geocode_community, check_coi_requirement, save_submission_tool, run_demo, end_call],
         config=LlmConfig(
             system_prompt=form.get_system_prompt(),
             introduction=f"Hi! Thanks for calling in. I'm here to help you share information about your community for the redistricting process. It'll just take a few minutes. {first_question}",

@@ -1,9 +1,11 @@
 """
-Notion backend - saves completed community of interest form submissions to a Notion database.
+Supabase backend - saves completed community of interest form submissions to Supabase.
 
-Creates the database automatically on first run if it doesn't exist.
+Replaces the Notion backend with Supabase for persistent storage.
 """
 
+import json
+import math
 import os
 from typing import Annotated
 
@@ -12,48 +14,33 @@ from loguru import logger
 
 from line.llm_agent import ToolEnv, loopback_tool
 
-NOTION_API_URL = "https://api.notion.com/v1"
-NOTION_VERSION = "2022-06-28"
+SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
+
 
 def _headers() -> dict:
-    token = os.getenv("NOTION_SECRET", "")
     return {
-        "Authorization": f"Bearer {token}",
-        "Notion-Version": NOTION_VERSION,
+        "apikey": SUPABASE_SERVICE_KEY,
+        "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
         "Content-Type": "application/json",
+        "Prefer": "return=representation",
     }
 
 
-def _get_submissions_db_id() -> str:
-    """Get the submissions database ID from env var."""
-    db_id = os.getenv("NOTION_SUBMISSIONS_DB_ID", "")
-    if not db_id:
-        raise Exception(
-            "NOTION_SUBMISSIONS_DB_ID not set. Add it to your .env file "
-            "and (if deployed) run: cartesia env set --from .env"
-        )
-    return db_id
-
-
-def _rich_text(value: str) -> dict:
-    """Build a Notion rich_text property value."""
-    # Notion rich_text content is capped at 2000 chars
-    return {"rich_text": [{"text": {"content": str(value)[:2000]}}]}
-
-
-def _build_geojson(answers: dict) -> str:
-    """Build a GeoJSON Feature string from the collected coordinates."""
-    import json
-    import math
-
+def _build_geojson(answers: dict) -> dict | None:
+    """Build a GeoJSON Feature dict from the collected coordinates."""
     coords_str = answers.get("all_coordinates", "")
     if not coords_str:
-        return ""
+        return None
 
     try:
-        coordinates = json.loads(coords_str)
+        if isinstance(coords_str, str):
+            coordinates = json.loads(coords_str)
+        else:
+            coordinates = coords_str
+
         if not coordinates or len(coordinates) < 3:
-            return ""
+            return None
 
         # Sort by angle from center to form proper polygon
         center_lat = sum(c["lat"] for c in coordinates) / len(coordinates)
@@ -68,7 +55,7 @@ def _build_geojson(answers: dict) -> str:
         ring = [[c["lng"], c["lat"]] for c in sorted_coords]
         ring.append(ring[0])
 
-        feature = {
+        return {
             "type": "Feature",
             "properties": {
                 "name": answers.get("community_name", ""),
@@ -79,24 +66,24 @@ def _build_geojson(answers: dict) -> str:
                 "coordinates": [ring],
             },
         }
-        return json.dumps(feature)
 
     except Exception as e:
         logger.error(f"Error building GeoJSON: {e}")
-        return ""
+        return None
 
 
 def _generate_static_map_url(answers: dict) -> str | None:
     """Generate a Google Maps Static API URL that renders a filled polygon image."""
-    import json
-    import math
-
     try:
         coords_str = answers.get("all_coordinates", "")
         if not coords_str:
             return None
 
-        coordinates = json.loads(coords_str)
+        if isinstance(coords_str, str):
+            coordinates = json.loads(coords_str)
+        else:
+            coordinates = coords_str
+
         if not coordinates or len(coordinates) < 3:
             return None
 
@@ -114,13 +101,11 @@ def _generate_static_map_url(answers: dict) -> str | None:
 
         sorted_coords = sorted(coordinates, key=angle)
 
-        # Build path param: color:fill|lat,lng|lat,lng|...
+        # Build path param
         path_parts = [f"{c['lat']},{c['lng']}" for c in sorted_coords]
-        # Close the polygon
         path_parts.append(path_parts[0])
         path_str = "|".join(path_parts)
 
-        # Google Static Maps API — draws a filled polygon
         url = (
             "https://maps.googleapis.com/maps/api/staticmap?"
             f"size=600x400"
@@ -137,85 +122,71 @@ def _generate_static_map_url(answers: dict) -> str | None:
 
 
 async def save_submission(answers: dict) -> str:
-    """Save a completed form submission to Notion. Returns the page URL or error."""
+    """Save a completed form submission to Supabase. Returns status message."""
     try:
-        db_id = _get_submissions_db_id()
+        if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
+            return "Error: SUPABASE_URL and SUPABASE_SERVICE_KEY must be set in environment"
 
-        properties = {
-            "Name": {"title": [{"text": {"content": answers.get("caller_name", "Unknown")}}]},
-            "Consent": {"checkbox": bool(answers.get("consent", False))},
-            "Zip Code": _rich_text(answers.get("zipcode", "")),
-            "Community Name": _rich_text(answers.get("community_name", "")),
-            "Community Description": _rich_text(answers.get("community_description", "")),
-            "Key Places": _rich_text(answers.get("key_places", "")),
-            "Community Boundaries": _rich_text(answers.get("community_boundaries", "")),
-            "Cultural Interests": _rich_text(answers.get("cultural_interests", "")),
-            "Economic Interests": _rich_text(answers.get("economic_interests", "")),
-            "Community Activities": _rich_text(answers.get("community_activities", "")),
-            "Other Considerations": _rich_text(answers.get("other_considerations", "")),
-            "Geographic Summary": _rich_text(answers.get("geographic_summary", "")),
-            "Primary Address": _rich_text(answers.get("primary_address", "")),
-            "Geocoded Landmarks": _rich_text(answers.get("geocoded_landmarks", "")),
-            "All Coordinates": _rich_text(answers.get("all_coordinates", "")),
-            "GeoJSON": _rich_text(_build_geojson(answers)),
-        }
+        # Parse coordinates from string to JSON if needed
+        all_coordinates = answers.get("all_coordinates", "")
+        if isinstance(all_coordinates, str) and all_coordinates:
+            try:
+                all_coordinates = json.loads(all_coordinates)
+            except json.JSONDecodeError:
+                all_coordinates = None
+        elif not all_coordinates:
+            all_coordinates = None
 
-        # Phone number uses the dedicated phone_number property type
-        phone = answers.get("phone_number", "")
-        if phone:
-            properties["Phone"] = {"phone_number": str(phone)}
-
-        # Build page body with map image if we have coordinates
-        children = []
+        geojson = _build_geojson(answers)
         map_url = _generate_static_map_url(answers)
-        if map_url:
-            children.append({
-                "object": "block",
-                "type": "heading_2",
-                "heading_2": {
-                    "rich_text": [{"type": "text", "text": {"content": "Community Boundary Map"}}]
-                },
-            })
-            children.append({
-                "object": "block",
-                "type": "image",
-                "image": {
-                    "type": "external",
-                    "external": {"url": map_url},
-                },
-            })
 
-        page_payload = {
-            "parent": {"database_id": db_id},
-            "properties": properties,
+        row = {
+            "caller_name": answers.get("caller_name", "Unknown"),
+            "phone_number": answers.get("phone_number", ""),
+            "consent": bool(answers.get("consent", False)),
+            "zipcode": answers.get("zipcode", ""),
+            "address": answers.get("address", ""),
+            "community_name": answers.get("community_name", ""),
+            "community_description": answers.get("community_description", ""),
+            "key_places": answers.get("key_places", ""),
+            "community_boundaries": answers.get("community_boundaries", ""),
+            "cultural_interests": answers.get("cultural_interests", ""),
+            "economic_interests": answers.get("economic_interests", ""),
+            "community_activities": answers.get("community_activities", ""),
+            "other_considerations": answers.get("other_considerations", ""),
+            "geographic_summary": answers.get("geographic_summary", ""),
+            "primary_address": answers.get("primary_address", ""),
+            "geocoded_landmarks": answers.get("geocoded_landmarks", ""),
+            "all_coordinates": all_coordinates,
+            "geojson": geojson,
+            "map_image_url": map_url,
         }
-        if children:
-            page_payload["children"] = children
 
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.post(
-                f"{NOTION_API_URL}/pages",
+                f"{SUPABASE_URL}/rest/v1/submissions",
                 headers=_headers(),
-                json=page_payload,
+                json=row,
             )
-            data = resp.json()
 
-            if "id" in data:
-                url = data.get("url", "")
-                logger.info(f"Saved submission to Notion: {data['id']} ({url})")
-                return f"Saved to Notion successfully (ID: {data['id']})"
+            if resp.status_code in (200, 201):
+                data = resp.json()
+                row_id = data[0]["id"] if data else "unknown"
+                logger.info(f"Saved submission to Supabase: {row_id}")
+                return f"Saved successfully (ID: {row_id})"
             else:
-                error = data.get("message", str(data))
-                logger.error(f"Notion API error: {error}")
-                return f"Failed to save to Notion: {error}"
+                error = resp.text
+                logger.error(f"Supabase API error: {resp.status_code} {error}")
+                return f"Failed to save: {error}"
 
     except Exception as e:
-        logger.error(f"Error saving to Notion: {e}")
-        return f"Error saving to Notion: {e}"
+        logger.error(f"Error saving to Supabase: {e}")
+        return f"Error saving: {e}"
 
 
-def _get_redistricting_db_id() -> str:
-    return os.getenv("REDISTRICTING_CRITERIA_DB_ID", "")
+# ============================================================
+# Redistricting criteria lookup (replaces Notion DB query)
+# ============================================================
 
 # Zipcode prefix → state mapping (first 3 digits)
 _ZIP_TO_STATE: dict[str, str] = {}
@@ -225,7 +196,6 @@ def _init_zip_to_state():
     """Build zipcode-prefix-to-state mapping."""
     if _ZIP_TO_STATE:
         return
-    # Ranges: (start, end, state)  — covers all US zip prefixes
     ranges = [
         ("005", "009", "Puerto Rico"), ("010", "027", "Massachusetts"),
         ("028", "029", "Rhode Island"), ("030", "038", "New Hampshire"),
@@ -270,28 +240,32 @@ def _zip_to_state(zipcode: str) -> str | None:
 
 
 async def _lookup_coi_required(state: str) -> dict | None:
-    """Query the 2020 Redistricting Criteria Notion DB for a state."""
+    """Query the redistricting_criteria table in Supabase for a state."""
+    if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
+        logger.error("Supabase not configured for redistricting criteria lookup")
+        return None
+
     async with httpx.AsyncClient(timeout=15.0) as client:
-        resp = await client.post(
-            f"{NOTION_API_URL}/databases/{_get_redistricting_db_id()}/query",
+        resp = await client.get(
+            f"{SUPABASE_URL}/rest/v1/redistricting_criteria",
             headers=_headers(),
-            json={
-                "filter": {
-                    "property": "State",
-                    "title": {"equals": state},
-                },
-            },
+            params={"state": f"eq.{state}", "limit": "1"},
         )
-        data = resp.json()
-        results = data.get("results", [])
-        if not results:
+
+        if resp.status_code != 200:
+            logger.error(f"Supabase query error: {resp.status_code} {resp.text}")
             return None
 
-        props = results[0]["properties"]
-        coi_required = props.get("Communities of Interest Required", {}).get("checkbox", False)
-        notes_parts = props.get("Notes", {}).get("rich_text", [])
-        notes = "".join(t.get("plain_text", "") for t in notes_parts)
-        return {"state": state, "coi_required": coi_required, "notes": notes}
+        data = resp.json()
+        if not data:
+            return None
+
+        row = data[0]
+        return {
+            "state": row["state"],
+            "coi_required": row.get("coi_required", False),
+            "notes": row.get("notes", ""),
+        }
 
 
 @loopback_tool(is_background=True)
@@ -328,5 +302,3 @@ async def check_coi_requirement(
         msg += f" Notes: {result['notes']}"
 
     yield msg
-
-
